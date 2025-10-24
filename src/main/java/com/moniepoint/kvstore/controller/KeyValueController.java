@@ -28,13 +28,13 @@ public class KeyValueController {
     }
 
     @GetMapping("/{key}")
-    public ResponseEntity<String> read(@PathVariable String key) {
+    public ResponseEntity<String> read(@PathVariable String key) throws IOException {
         Optional<String> value = service.read(key);
         return value.map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/range/{startKey}/{endKey}")
-    public List<KeyValue> readKeyRange(@PathVariable String startKey, @PathVariable String endKey) {
+    public List<KeyValue> readKeyRange(@PathVariable String startKey, @PathVariable String endKey) throws IOException {
         return service.readKeyRange(startKey, endKey);
     }
 
