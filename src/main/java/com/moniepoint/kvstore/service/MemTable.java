@@ -3,13 +3,16 @@ package com.moniepoint.kvstore.service;
 import com.moniepoint.kvstore.comparator.NaturalKeyComparator;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 @Component
 public class MemTable {
+
+    private static final Logger logger = LoggerFactory.getLogger(MemTable.class);
 
     private final ConcurrentNavigableMap<String, String> memtable;
     private long sizeInBytes = 0;
@@ -23,10 +26,12 @@ public class MemTable {
     }
 
     public void put(String key, String value) {
+        logger.debug("MemTable: Putting key '{}'", key);
         String oldValue = memtable.put(key, value);
         int valueSize = getByteSize(value);
 
         if (oldValue == null) {
+            logger.debug("MemTable: New key '{}', size increased by {} bytes", key, getByteSize(key) + valueSize);
             sizeInBytes += getByteSize(key) + valueSize;
         } else {
             sizeInBytes += valueSize - getByteSize(oldValue);
@@ -34,10 +39,12 @@ public class MemTable {
     }
 
     public String get(String key) {
+        logger.debug("MemTable: Getting key '{}'", key);
         return memtable.get(key);
     }
 
     public boolean containsKey(String key) {
+        logger.debug("MemTable: Checking containsKey for '{}'", key);
         return memtable.containsKey(key);
     }
 
@@ -46,6 +53,7 @@ public class MemTable {
     }
 
     public void clear() {
+        logger.info("MemTable: Clearing all entries.");
         memtable.clear();
         sizeInBytes = 0;
     }
