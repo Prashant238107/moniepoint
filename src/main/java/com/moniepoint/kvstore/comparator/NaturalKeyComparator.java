@@ -13,7 +13,6 @@ public class NaturalKeyComparator implements Comparator<String> {
         Matcher m1 = KEY_PATTERN.matcher(s1);
         Matcher m2 = KEY_PATTERN.matcher(s2);
 
-        // If both match the pattern (e.g., "key1", "key10")
         if (m1.matches() && m2.matches()) {
             String text1 = m1.group(1);
             String num1 = m1.group(2);
@@ -25,11 +24,9 @@ public class NaturalKeyComparator implements Comparator<String> {
                 return textCompare;
             }
 
-            // Compare numerical parts
             return Integer.compare(Integer.parseInt(num1), Integer.parseInt(num2));
         }
 
-        // Fallback to default string comparison if pattern doesn't match
         return s1.compareTo(s2);
     }
 }

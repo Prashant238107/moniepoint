@@ -26,7 +26,7 @@ public class WalEntry {
         return value;
     }
 
-    public boolean isDelete() {
+    public boolean isDeleted() {
         return delete;
     }
 }

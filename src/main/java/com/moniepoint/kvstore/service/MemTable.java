@@ -1,10 +1,10 @@
 package com.moniepoint.kvstore.service;
 
 import com.moniepoint.kvstore.comparator.NaturalKeyComparator;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
@@ -14,18 +14,22 @@ public class MemTable {
     private final ConcurrentNavigableMap<String, String> memtable;
     private long sizeInBytes = 0;
 
-    public static final String DELETED_MARKER = "__DELETED__";
-
     public MemTable() {
         this.memtable = new ConcurrentSkipListMap<>(new NaturalKeyComparator());
     }
 
+    private int getByteSize(String str) {
+        return str.getBytes(StandardCharsets.UTF_8).length;
+    }
+
     public void put(String key, String value) {
         String oldValue = memtable.put(key, value);
-        if (oldValue == null) { // New entry
-            sizeInBytes += key.length() + value.length();
-        } else { // Update existing entry
-            sizeInBytes += value.length() - oldValue.length();
+        int valueSize = getByteSize(value);
+
+        if (oldValue == null) {
+            sizeInBytes += getByteSize(key) + valueSize;
+        } else {
+            sizeInBytes += valueSize - getByteSize(oldValue);
         }
     }
 
