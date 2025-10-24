@@ -2,6 +2,7 @@ package com.moniepoint.kvstore.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moniepoint.kvstore.entity.KeyValue;
+import com.moniepoint.kvstore.entity.SSTableMeta;
 import com.moniepoint.kvstore.entity.WalEntry;
 import com.moniepoint.kvstore.comparator.NaturalKeyComparator;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -41,7 +43,8 @@ public class KeyValueService {
     @Autowired
     private ObjectMapper objectMapper;
     private BufferedWriter walWriter;
-    private List<Path> sstables = new CopyOnWriteArrayList<>();
+    private List<SSTableMeta> sstables = new CopyOnWriteArrayList<>();
+    private final NaturalKeyComparator comparator = new NaturalKeyComparator();
 
     @PostConstruct
     public void init() throws IOException {
@@ -49,9 +52,9 @@ public class KeyValueService {
         if (!Files.exists(sstableDir)) {
             Files.createDirectories(sstableDir);
         }
-        walWriter = new BufferedWriter(new FileWriter(walFilePath, true));
-        recoverState();
+        walWriter = Files.newBufferedWriter(Paths.get(walFilePath), StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
         loadSSTables();
+        recoverState();
     }
 
     @PreDestroy
@@ -63,7 +66,11 @@ public class KeyValueService {
     }
 
     private void recoverState() throws IOException {
-        try (BufferedReader reader = new BufferedReader(new FileReader(walFilePath))) {
+        Path walPath = Paths.get(walFilePath);
+        if (!Files.exists(walPath)) {
+            return;
+        }
+        try (BufferedReader reader = Files.newBufferedReader(walPath, StandardCharsets.UTF_8)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 try {
@@ -82,11 +89,29 @@ public class KeyValueService {
 
     private void loadSSTables() throws IOException {
         try (Stream<Path> paths = Files.list(Paths.get(sstablePath))) {
-            sstables = paths
+            List<SSTableMeta> loadedMetas = new ArrayList<>();
+            paths
                     .filter(Files::isRegularFile)
                     .filter(p -> p.getFileName().toString().startsWith("sstable-"))
-                    .sorted(Collections.reverseOrder()) // Newest first
-                    .collect(Collectors.toCollection(CopyOnWriteArrayList::new));
+                    .forEach(path -> {
+                        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                            String firstLine = reader.readLine();
+                            if (firstLine != null) {
+                                String minKey = firstLine.split(",", 2)[0];
+                                String lastLine = firstLine;
+                                String currentLine;
+                                while ((currentLine = reader.readLine()) != null) {
+                                    lastLine = currentLine;
+                                }
+                                String maxKey = lastLine.split(",", 2)[0];
+                                loadedMetas.add(new SSTableMeta(path, minKey, maxKey));
+                            }
+                        } catch (IOException e) {
+                            System.err.println("Could not read metadata for SSTable: " + path);
+                        }
+                    });
+            Collections.sort(loadedMetas);
+            this.sstables = new CopyOnWriteArrayList<>(loadedMetas);
         }
     }
 
@@ -95,17 +120,21 @@ public class KeyValueService {
             return;
         }
 
+        ConcurrentNavigableMap<String, String> entriesToFlush = memTable.getEntries();
         long timestamp = System.currentTimeMillis();
         Path sstableFile = Paths.get(sstablePath, "sstable-" + timestamp + ".txt");
 
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(sstableFile.toFile()))) {
-            for (Map.Entry<String, String> entry : memTable.getEntries().entrySet()) {
+        try (BufferedWriter writer = Files.newBufferedWriter(sstableFile, StandardCharsets.UTF_8)) {
+            for (Map.Entry<String, String> entry : entriesToFlush.entrySet()) {
                 writer.write(entry.getKey() + "," + entry.getValue() + "\n");
             }
         }
 
-        sstables.add(0, sstableFile);
+        SSTableMeta newMeta = new SSTableMeta(sstableFile, entriesToFlush.firstKey(), entriesToFlush.lastKey());
+        sstables.add(0, newMeta);
         memTable.clear();
+        walWriter.close();
+        walWriter = Files.newBufferedWriter(Paths.get(walFilePath), StandardCharsets.UTF_8);
     }
 
     public void put(String key, String value) throws IOException {
@@ -133,17 +162,17 @@ public class KeyValueService {
             }
             return Optional.of(value);
         }
-        for (Path sstableFile : sstables) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(sstableFile.toFile()))) {
+
+        for (SSTableMeta meta : sstables) {
+            if (comparator.compare(key, meta.getMinKey()) < 0 || comparator.compare(key, meta.getMaxKey()) > 0) {
+                continue;
+            }
+            try (BufferedReader reader = Files.newBufferedReader(meta.getPath(), StandardCharsets.UTF_8)) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     String[] parts = line.split(",", 2);
                     if (parts.length == 2 && parts[0].equals(key)) {
-                        if (parts[1].equals(DELETED_MARKER)) {
-                            return Optional.empty();
-                        } else {
-                            return Optional.of(parts[1]);
-                        }
+                        return parts[1].equals(DELETED_MARKER) ? Optional.empty() : Optional.of(parts[1]);
                     }
                 }
             }
@@ -155,8 +184,8 @@ public class KeyValueService {
         ConcurrentNavigableMap<String, String> mergedResults = new ConcurrentSkipListMap<>(new NaturalKeyComparator());
         memTable.subMap(startKey, true, endKey, true)
                 .forEach(mergedResults::put);
-        for (Path sstableFile : sstables) {
-            SSTableReader reader = new SSTableReader(sstableFile, new NaturalKeyComparator());
+        for (SSTableMeta meta : sstables) {
+            SSTableReader reader = new SSTableReader(meta.getPath(), new NaturalKeyComparator());
             List<KeyValue> sstableKVs = reader.findInRange(startKey, endKey);
             for (KeyValue kv : sstableKVs) {
                 mergedResults.putIfAbsent(kv.getKey(), kv.getValue());
@@ -172,10 +201,10 @@ public class KeyValueService {
         WalEntry entry = new WalEntry(key, null, true);
         walWriter.write(objectMapper.writeValueAsString(entry) + "\n");
         walWriter.flush();
-        memTable.put(key,DELETED_MARKER); // Use marker for tombstone
+        memTable.put(key,DELETED_MARKER);
     }
 
-    public List<Path> getSstables() {
+    public List<SSTableMeta> getSstables() {
         return sstables;
     }
 
@@ -183,11 +212,11 @@ public class KeyValueService {
         return sstablePath;
     }
 
-    public synchronized void replaceSSTables(List<Path> oldSSTables, Path newSSTable) {
-        List<Path> newSstableList = new ArrayList<>(sstables);
-        newSstableList.removeAll(oldSSTables);
-        newSstableList.add(newSSTable);
-        newSstableList.sort(Collections.reverseOrder());
+    public synchronized void replaceSSTables(List<SSTableMeta> oldMetas, SSTableMeta newMeta) {
+        List<SSTableMeta> newSstableList = new ArrayList<>(sstables);
+        newSstableList.removeAll(oldMetas);
+        newSstableList.add(newMeta);
+        Collections.sort(newSstableList); // Sorts newest-to-oldest
         this.sstables = new CopyOnWriteArrayList<>(newSstableList);
     }
 }

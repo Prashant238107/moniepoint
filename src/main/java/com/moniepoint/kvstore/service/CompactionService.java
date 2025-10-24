@@ -2,14 +2,15 @@ package com.moniepoint.kvstore.service;
 
 import com.moniepoint.kvstore.entity.KeyValue;
 import com.moniepoint.kvstore.comparator.NaturalKeyComparator;
+import com.moniepoint.kvstore.entity.SSTableMeta;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedWriter;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -31,19 +32,16 @@ public class CompactionService {
 
     @Scheduled(fixedRateString = "${kvstore.compaction.schedule.ms}")
     public void runCompaction() throws IOException {
-        List<Path> sstables = keyValueService.getSstables();
+        List<SSTableMeta> sstables = keyValueService.getSstables();
         if (sstables.size() < compactionFileCountTrigger) {
             return;
         }
 
-        System.out.println("Starting compaction...");
-
-        List<Path> toCompact = sstables.subList(sstables.size() - 1, sstables.size());
-
+        List<SSTableMeta> toCompact = sstables.subList(sstables.size() - 2, sstables.size());
         ConcurrentNavigableMap<String, String> mergedResults = new ConcurrentSkipListMap<>(new NaturalKeyComparator());
 
-        for (Path sstableFile : toCompact) {
-            SSTableReader reader = new SSTableReader(sstableFile, new NaturalKeyComparator());
+        for (SSTableMeta meta : toCompact) {
+            SSTableReader reader = new SSTableReader(meta.getPath(), new NaturalKeyComparator());
             List<KeyValue> sstableKVs = reader.readAll();
             for (KeyValue kv : sstableKVs) {
                 mergedResults.put(kv.getKey(), kv.getValue());
@@ -51,19 +49,21 @@ public class CompactionService {
         }
 
         long timestamp = System.currentTimeMillis();
-        Path compactedSSTable = Paths.get(keyValueService.getSstablePath(), "sstable-compacted-" + timestamp + ".txt");
+        Path compactedSSTablePath = Paths.get(keyValueService.getSstablePath(), "sstable-" + timestamp + ".txt");
 
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(compactedSSTable.toFile()))) {
+        try (BufferedWriter writer = Files.newBufferedWriter(compactedSSTablePath, StandardCharsets.UTF_8)) {
             for (Map.Entry<String, String> entry : mergedResults.entrySet()) {
                 if (!entry.getValue().equals(DELETED_MARKER)) {
                     writer.write(entry.getKey() + "," + entry.getValue() + "\n");
                 }
             }
         }
-        keyValueService.replaceSSTables(toCompact, compactedSSTable);
-        for (Path oldFile : toCompact) {
-            Files.delete(oldFile);
+
+        SSTableMeta newMeta = new SSTableMeta(compactedSSTablePath, mergedResults.firstKey(), mergedResults.lastKey());
+        keyValueService.replaceSSTables(toCompact, newMeta);
+
+        for (SSTableMeta oldMeta : toCompact) {
+            Files.delete(oldMeta.getPath());
         }
-        System.out.println("Compaction finished.");
     }
 }

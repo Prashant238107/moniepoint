@@ -58,7 +58,7 @@ public class MemTable {
         return sizeInBytes;
     }
 
-    public Map<String, String> getEntries() {
+    public ConcurrentNavigableMap<String, String> getEntries() {
         return memtable;
     }
 }
