@@ -2,6 +2,7 @@ package com.moniepoint.kvstore.controller;
 
 import com.moniepoint.kvstore.service.KeyValueService;
 import com.moniepoint.kvstore.pojo.KeyValue;
+import com.moniepoint.kvstore.pojo.RangeRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/kv")
+@RequestMapping("/moniepoint/kv")
 public class KeyValueController {
 
     private static final Logger logger = LoggerFactory.getLogger(KeyValueController.class);
@@ -21,10 +22,15 @@ public class KeyValueController {
     @Autowired
     private KeyValueService service;
 
-    @PutMapping("/{key}")
-    public void put(@PathVariable String key, @RequestBody String value) throws IOException {
-        logger.info("API: Received PUT request for key: {}", key);
-        service.put(key, value);
+    @PutMapping
+    public ResponseEntity<Void> put(@RequestBody KeyValue request) throws IOException {
+        logger.info("API: Received PUT request for key: {}", request.getKey());
+        boolean created = service.put(request.getKey(), request.getValue());
+        if (created) {
+            return ResponseEntity.status(201).build();
+        } else {
+            return ResponseEntity.ok().build();
+        }
     }
 
     @PutMapping("/batch")
@@ -40,10 +46,13 @@ public class KeyValueController {
         return value.map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    @GetMapping("/range/{startKey}/{endKey}")
-    public List<KeyValue> readKeyRange(@PathVariable String startKey, @PathVariable String endKey) throws IOException {
-        logger.info("API: Received GET RANGE request from {} to {}", startKey, endKey);
-        return service.readKeyRange(startKey, endKey);
+    @PostMapping("/range")
+    public List<KeyValue> readKeyRange(
+            @RequestBody RangeRequest request,
+            @RequestParam(required = false, defaultValue = "false") boolean internal
+    ) throws IOException {
+        logger.info("API: Received POST RANGE request from {} to {} (internal: {})", request.getStartKey(), request.getEndKey(), internal);
+        return service.readKeyRange(request.getStartKey(), request.getEndKey(), internal);
     }
 
     @DeleteMapping("/{key}")

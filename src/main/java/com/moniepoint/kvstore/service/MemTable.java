@@ -25,7 +25,7 @@ public class MemTable {
         return str.getBytes(StandardCharsets.UTF_8).length;
     }
 
-    public void put(String key, String value) {
+    public String put(String key, String value) {
         logger.debug("MemTable: Putting key '{}'", key);
         String oldValue = memtable.put(key, value);
         int valueSize = getByteSize(value);
@@ -36,6 +36,7 @@ public class MemTable {
         } else {
             sizeInBytes += valueSize - getByteSize(oldValue);
         }
+        return oldValue;
     }
 
     public String get(String key) {
