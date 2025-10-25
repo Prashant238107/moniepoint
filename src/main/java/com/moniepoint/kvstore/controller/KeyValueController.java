@@ -2,6 +2,7 @@ package com.moniepoint.kvstore.controller;
 
 import com.moniepoint.kvstore.service.KeyValueService;
 import com.moniepoint.kvstore.pojo.KeyValue;
+import com.moniepoint.kvstore.entity.WalEntry;
 import com.moniepoint.kvstore.pojo.RangeRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -39,11 +40,23 @@ public class KeyValueController {
         service.batchPut(keyValues);
     }
 
+    @PutMapping("/internal/replicate")
+    public void replicate(@RequestBody WalEntry entry) throws IOException {
+        logger.info("API: Received internal replication request for key: {}", entry.getKey());
+        service.applyReplicatedWalEntry(entry);
+    }
+
+    @GetMapping("/internal/health")
+    public ResponseEntity<Void> healthCheck() {
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/{key}")
-    public ResponseEntity<String> read(@PathVariable String key) throws IOException {
+    public ResponseEntity<KeyValue> read(@PathVariable String key) throws IOException {
         logger.info("API: Received GET request for key: {}", key);
         Optional<String> value = service.read(key);
-        return value.map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.notFound().build());
+        return value.map(v -> ResponseEntity.ok(new KeyValue(key, v)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PostMapping("/range")
