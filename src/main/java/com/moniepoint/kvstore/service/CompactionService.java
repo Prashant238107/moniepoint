@@ -39,8 +39,15 @@ public class CompactionService {
     @Value("${kvstore.wal.path}")
     private String walPath;
 
+    @Value("${kvstore.cluster.is-maintenance-leader:false}")
+    private boolean isMaintenanceLeader;
+
     @Scheduled(fixedRateString = "${kvstore.compaction.schedule.ms}")
     public synchronized void runCompaction() throws IOException {
+        if (!isMaintenanceLeader) {
+            return; // Only the maintenance leader runs compaction
+        }
+
         logger.info("CompactionService: Starting scheduled SSTable compaction.");
         List<SSTableMetaData> sstables = keyValueService.getSstables();
         if (sstables.size() < compactionFileCountTrigger) {
@@ -94,6 +101,10 @@ public class CompactionService {
 
     @Scheduled(fixedRateString = "${kvstore.compaction.schedule.ms}", initialDelay = 30000)
     public synchronized void compactWalFiles() throws IOException {
+        if (!isMaintenanceLeader) {
+            return; // Only the maintenance leader runs WAL cleanup
+        }
+
         logger.info("CompactionService: Starting scheduled WAL file compaction.");
         List<SSTableMetaData> sstables = keyValueService.getSstables();
         if (sstables.isEmpty()) {

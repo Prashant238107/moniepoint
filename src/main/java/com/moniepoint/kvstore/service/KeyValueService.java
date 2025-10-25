@@ -211,6 +211,10 @@ public class KeyValueService {
         String oldValue = memTable.put(key, value);
         return oldValue == null;
     }
+    
+    public void applyReplicatedWalEntry(WalEntry entry) throws IOException {
+        writeToWalAndCheckLimits(entry);
+    }
 
     private void writeToWalAndCheckLimits(WalEntry entry) throws IOException {
         String walLine = objectMapper.writeValueAsString(entry) + "\n";
@@ -221,6 +225,20 @@ public class KeyValueService {
 
         if (memTable.getSizeInBytes() > memtableMaxSize || currentWalSize > walMaxSize) {
             flushMemtableToSSTable();
+        }
+
+        // If this is a leader processing a client write, replicate it.
+        // We check if the entry is a client write (not a replicated one) by seeing if it's a delete or has a value.
+        // Replicated entries are just applied locally.
+        if (clusterService.isCurrentNodeLeader(entry.getKey()) && (entry.isDeleted() || entry.getValue() != null)) {
+            List<String> replicaNodes = clusterService.getReplicaNodesForKey(entry.getKey());
+            for (String nodeUrl : replicaNodes) {
+                if (!nodeUrl.equals(clusterService.getCurrentNodeUrl())) {
+                    // This is a simple synchronous replication.
+                    // A real system might do this in parallel and wait for a quorum.
+                    replicationClient.replicateWalEntry(nodeUrl, entry);
+                }
+            }
         }
     }
 

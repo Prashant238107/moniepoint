@@ -12,9 +12,11 @@ A high-performance, persistent, and distributed key-value store built with Java 
 - **Handles Large Datasets**: Manages datasets much larger than available RAM by flushing data from the in-memory `MemTable` to sorted on-disk files (`SSTables`).
 - **Automatic Background Maintenance**:
     - **SSTable Compaction**: A scheduled service periodically merges smaller SSTables into larger ones to improve read performance and reclaim disk space from deleted or updated entries.
-    - **WAL Compaction**: A scheduled service cleans up obsolete WAL files whose data has been safely persisted in an SSTable.
-- **Distributed Request Routing**: Implements a leader-forwarding mechanism where nodes in a cluster automatically route write requests to the correct primary node responsible for a given key.
-- **RESTful API**: Provides simple and clean HTTP endpoints for all key-value operations.
+    - **WAL Cleanup**: A scheduled service cleans up obsolete WAL files whose data has been safely persisted in an SSTable.
+- **Data Replication**: Ensures data durability by replicating writes to multiple nodes. It uses a leader-follower model with a configurable replication factor.
+- **Automatic Failover (Simulated)**: The cluster can automatically detect node failures via health checks and elect a new leader for a data partition, ensuring high availability.
+- **Distributed Request Routing**: Implements a leader-forwarding mechanism where nodes in a cluster automatically route write requests to the correct primary node.
+- **RESTful API**: Provides simple and clean HTTP endpoints for all key-value operations, using JSON for request and response bodies.
 
 ## Architecture Overview
 
@@ -31,7 +33,10 @@ The system is built on two primary concepts: a local storage engine and a distri
 
 1.  **Partitioning**: The key space is partitioned across the nodes in the cluster using a simple hash-based algorithm. Each key has a designated "leader" node.
 2.  **Request Forwarding**: When a node receives a write/delete request for a key it is not the leader for, it forwards the request to the correct leader node. This provides a single-system illusion to the client.
-3.  **Coordination (Simulated)**: A `ClusterService` simulates a coordination service (like ZooKeeper or etcd) by managing a static list of cluster members. This service is responsible for determining the leader for any given key.
+3.  **Replication and Failover**:
+    - **Replication**: For each key, a set of replica nodes is determined. The first live node in this set acts as the **leader**. When the leader processes a write, it replicates the `WalEntry` to all other follower nodes in the set before confirming the write to the client.
+    - **Health Checks & Failover**: Each node periodically runs health checks on its peers. If a leader node fails, it is removed from the "live" set. When a new request arrives for a key previously owned by the failed node, the system automatically promotes the next live replica in the preference list to be the new leader. This provides seamless, automatic failover.
+    - **Coordination (Simulated)**: A `ClusterService` simulates a coordination service (like ZooKeeper or etcd) by managing the list of cluster members and their liveness state.
 
 ## Configuration
 
@@ -52,6 +57,7 @@ You can change these paths to absolute paths if desired (e.g., `/var/lib/kvstore
 - `kvstore.wal.max-size-bytes`: The maximum size a WAL file can reach before triggering a flush.
 - `kvstore.compaction.trigger.file-count`: The number of SSTables that must exist before the compaction service will run.
 - `kvstore.cluster.nodes`: A comma-separated list of all nodes in the cluster.
+- `kvstore.cluster.replication-factor`: The total number of copies to keep for each piece of data (e.g., 3).
 - `kvstore.cluster.current-node-url`: The URL of the specific node instance being run (used for self-identification).
 
 ## How to Run
@@ -66,7 +72,7 @@ You can change these paths to absolute paths if desired (e.g., `/var/lib/kvstore
 Navigate to the project's root directory and build the executable JAR file using the Maven wrapper.
 
 ```sh
-./mvnw clean package
+mvn clean install -DskipTests
 ```
 
 This will create an executable JAR in the `target/` directory (e.g., `target/moniepoint-1.0-SNAPSHOT.jar`).

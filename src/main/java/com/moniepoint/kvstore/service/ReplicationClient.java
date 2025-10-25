@@ -2,7 +2,9 @@ package com.moniepoint.kvstore.service;
 
 import com.moniepoint.kvstore.pojo.KeyValue;
 import com.moniepoint.kvstore.pojo.RangeRequest;
+import com.moniepoint.kvstore.entity.WalEntry;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -39,5 +41,20 @@ public class ReplicationClient {
                 new ParameterizedTypeReference<>() {}
         );
         return response.getBody();
+    }
+
+    public void replicateWalEntry(String nodeUrl, WalEntry entry) {
+        logger.info("Replicating WAL entry for key '{}' to node: {}", entry.getKey(), nodeUrl);
+        restTemplate.put(nodeUrl + "/moniepoint/kv/internal/replicate", entry);
+    }
+
+    public boolean isNodeHealthy(String nodeUrl) {
+        try {
+            ResponseEntity<String> response = restTemplate.getForEntity(nodeUrl + "/moniepoint/kv/internal/health", String.class);
+            return response.getStatusCode() == HttpStatus.OK;
+        } catch (Exception e) {
+            logger.warn("Health check failed for node: {}. Reason: {}", nodeUrl, e.getMessage());
+            return false;
+        }
     }
 }
