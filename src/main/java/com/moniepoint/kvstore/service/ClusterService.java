@@ -43,4 +43,8 @@ public class ClusterService {
     public String getCurrentNodeUrl() {
         return currentNodeUrl;
     }
+
+    public List<String> getNodes() {
+        return nodes;
+    }
 }

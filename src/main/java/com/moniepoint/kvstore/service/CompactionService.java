@@ -2,7 +2,7 @@ package com.moniepoint.kvstore.service;
 
 import com.moniepoint.kvstore.pojo.KeyValue;
 import com.moniepoint.kvstore.comparator.NaturalKeyComparator;
-import com.moniepoint.kvstore.entity.SSTableMeta;
+import com.moniepoint.kvstore.entity.SSTableMetaData;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -42,17 +42,17 @@ public class CompactionService {
     @Scheduled(fixedRateString = "${kvstore.compaction.schedule.ms}")
     public synchronized void runCompaction() throws IOException {
         logger.info("CompactionService: Starting scheduled SSTable compaction.");
-        List<SSTableMeta> sstables = keyValueService.getSstables();
+        List<SSTableMetaData> sstables = keyValueService.getSstables();
         if (sstables.size() < compactionFileCountTrigger) {
             logger.debug("CompactionService: Not enough SSTables to trigger compaction ({} < {}). Skipping.", sstables.size(), compactionFileCountTrigger);
             return;
         }
 
-        List<SSTableMeta> toCompact = sstables.subList(Math.max(0, sstables.size() - 2), sstables.size());
+        List<SSTableMetaData> toCompact = sstables.subList(Math.max(0, sstables.size() - 2), sstables.size());
         logger.info("CompactionService: Compacting {} SSTables: {}", toCompact.size(), toCompact.stream().map(m -> m.getPath().getFileName().toString()).collect(Collectors.joining(", ")));
         ConcurrentNavigableMap<String, String> mergedResults = new ConcurrentSkipListMap<>(new NaturalKeyComparator());
 
-        for (SSTableMeta meta : toCompact) {
+        for (SSTableMetaData meta : toCompact) {
             SSTableReader reader = new SSTableReader(meta.getPath(), new NaturalKeyComparator());
             if (!Files.exists(meta.getPath())) {
                 logger.warn("CompactionService: SSTable {} was deleted during compaction. Skipping.", meta.getPath().getFileName());
@@ -64,7 +64,7 @@ public class CompactionService {
             }
         }
 
-        long timestamp = getTimestampFromPath(toCompact.get(0).getPath());
+        long timestamp = System.currentTimeMillis();
         Path compactedSSTablePath = Paths.get(keyValueService.getSstablePath(), "sstable-" + timestamp + ".txt");
         logger.debug("CompactionService: New compacted SSTable path: {}", compactedSSTablePath.getFileName());
 
@@ -82,10 +82,10 @@ public class CompactionService {
             logger.debug("CompactionService: Wrote {} entries to new SSTable.", mergedResults.size());
         }
 
-        SSTableMeta newMeta = new SSTableMeta(compactedSSTablePath, mergedResults.firstKey(), mergedResults.lastKey());
+        SSTableMetaData newMeta = new SSTableMetaData(compactedSSTablePath, mergedResults.firstKey(), mergedResults.lastKey());
         keyValueService.replaceSSTables(toCompact, newMeta);
 
-        for (SSTableMeta oldMeta : toCompact) {
+        for (SSTableMetaData oldMeta : toCompact) {
             logger.debug("CompactionService: Deleting old SSTable: {}", oldMeta.getPath().getFileName());
             Files.delete(oldMeta.getPath());
         }
@@ -95,12 +95,12 @@ public class CompactionService {
     @Scheduled(fixedRateString = "${kvstore.compaction.schedule.ms}", initialDelay = 30000)
     public synchronized void compactWalFiles() throws IOException {
         logger.info("CompactionService: Starting scheduled WAL file compaction.");
-        List<SSTableMeta> sstables = keyValueService.getSstables();
+        List<SSTableMetaData> sstables = keyValueService.getSstables();
         if (sstables.isEmpty()) {
             return;
         }
 
-        SSTableMeta oldestSSTable = sstables.get(sstables.size() - 1);
+        SSTableMetaData oldestSSTable = sstables.get(sstables.size() - 1);
         logger.debug("CompactionService: Oldest SSTable is {}. Safe timestamp: {}", oldestSSTable.getPath().getFileName(), getTimestampFromPath(oldestSSTable.getPath()));
         long safeTimestamp = getTimestampFromPath(oldestSSTable.getPath());
 

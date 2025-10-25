@@ -5,7 +5,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class NaturalKeyComparator implements Comparator<String> {
-
     private static final Pattern KEY_PATTERN = Pattern.compile("([a-zA-Z]+)(\\d+)");
 
     @Override

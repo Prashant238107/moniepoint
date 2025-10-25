@@ -113,24 +113,24 @@ You now have a 3-node cluster running locally. You can send requests to any node
 ## API Endpoints
 
 | Method | URL                               | Description                                      |
-|--------|-----------------------------------|--------------------------------------------------|
-| `PUT`  | `/kv/{key}`                       | Creates or updates a value for the given key.    |
-| `PUT`  | `/kv/batch`                       | Creates or updates multiple key-value pairs.     |
-| `GET`  | `/kv/{key}`                       | Retrieves the value for the given key.           |
-| `GET`  | `/kv/range/{startKey}/{endKey}`   | Retrieves all keys and values within a range.    |
-| `DELETE`| `/kv/{key}`                      | Deletes a key.                                   |
+|--------|-------------------------------------------|--------------------------------------------------|
+| `PUT`  | `/moniepoint/kv`                             | Creates or updates a value for the given key.    |
+| `PUT`  | `/moniepoint/kv/batch`                       | Creates or updates multiple key-value pairs in bulk.     |
+| `GET`  | `/moniepoint/kv/{key}`                       | Retrieves the value for the given key.           |
+| `POST` | `/moniepoint/kv/range`                       | Retrieves all keys and values within a given range.    |
+| `DELETE`| `/moniepoint/kv/{key}`                      | Deletes a key.                                   |
 
 ## Testing the Cluster
 
 1.  **Start the 3-node cluster** as described above.
 2.  **Send a write request to any node** (e.g., Node 8080).
     ```sh
-    curl -X PUT -H "Content-Type: text/plain" -d "hello distributed world" http://localhost:8080/kv/my-test-key
+    curl -X PUT -H "Content-Type: application/json" -d '{"key": "my-test-key", "value": "hello distributed world"}' http://localhost:8080/moniepoint/kv
     ```
 3.  **Observe the logs**. You will see Node 8080 receive the request, determine the correct leader (e.g., Node 8082), and log that it is "Forwarding" the request. The logs on Node 8082 will show it received the request and processed it "locally".
 4.  **Read the data back from the leader node**. You must query the node that stores the data.
     ```sh
     # Assuming Node 8082 is the leader for 'my-test-key'
-    curl http://localhost:8082/kv/my-test-key
+    curl http://localhost:8082/moniepoint/kv/my-test-key
     ```
     This will return `hello distributed world`.
